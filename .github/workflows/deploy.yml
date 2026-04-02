@@ -68,7 +68,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install Wrangler
-        run: bun install -g wrangler@3
+        run: bun install -g wrangler@4.78.0
 
       - name: Compute slug
         id: slug
@@ -87,9 +87,8 @@ jobs:
 
           if [ -z "$DB_ID" ]; then
             echo "Creating D1 database: $DB_NAME"
-            RESULT=$(wrangler d1 create "$DB_NAME" 2>&1)
-            echo "$RESULT"
-            DB_ID=$(echo "$RESULT" | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+            RESULT=$(wrangler d1 create "$DB_NAME" --json)
+            DB_ID=$(echo "$RESULT" | jq -r '.uuid // .result.uuid // empty')
           else
             echo "D1 database already exists: $DB_NAME ($DB_ID)"
           fi
