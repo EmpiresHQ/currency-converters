@@ -9,9 +9,10 @@ DB_ID=$(wrangler d1 info "$DB_NAME" --json 2>/dev/null | jq -r '.uuid // empty' 
 
 if [ -z "$DB_ID" ]; then
   echo "Creating D1 database: $DB_NAME" >&2
-  RESULT=$(wrangler d1 create "$DB_NAME" --json)
-  # Handle different wrangler output formats (.uuid or .result.uuid)
-  DB_ID=$(echo "$RESULT" | jq -r '.uuid // .result.uuid // empty')
+  RESULT=$(wrangler d1 create "$DB_NAME" 2>&1)
+  echo "$RESULT" >&2
+  # Parse UUID from text output (d1 create doesn't support --json in wrangler v3)
+  DB_ID=$(echo "$RESULT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
 else
   echo "D1 database already exists: $DB_NAME ($DB_ID)" >&2
 fi

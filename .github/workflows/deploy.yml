@@ -87,8 +87,9 @@ jobs:
 
           if [ -z "$DB_ID" ]; then
             echo "Creating D1 database: $DB_NAME"
-            RESULT=$(wrangler d1 create "$DB_NAME" --json)
-            DB_ID=$(echo "$RESULT" | jq -r '.uuid // .result.uuid // empty')
+            RESULT=$(wrangler d1 create "$DB_NAME" 2>&1)
+            echo "$RESULT"
+            DB_ID=$(echo "$RESULT" | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
           else
             echo "D1 database already exists: $DB_NAME ($DB_ID)"
           fi
