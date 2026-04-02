@@ -1,0 +1,8 @@
+{
+  "name": "currency-converter",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "bun run --filter @currency-converter/frontend build && cp -r apps/frontend/dist apps/api/public && bun run --filter @currency-converter/api dev"
+  }
+}

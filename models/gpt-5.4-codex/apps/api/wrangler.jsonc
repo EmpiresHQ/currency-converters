@@ -1,0 +1,36 @@
+{
+  "name": "currency-converter-gpt-5-4-codex",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "currency-converter",
+      "database_id": "local-currency-converter"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RATE_TICKER",
+        "class_name": "RateTicker"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["RateTicker"],
+      "tag": "v1"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/1 * * * *"]
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  }
+}

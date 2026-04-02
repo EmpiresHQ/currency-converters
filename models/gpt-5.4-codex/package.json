@@ -1,0 +1,15 @@
+{
+  "name": "gpt-5.4-codex-currency-converter",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --cwd apps/frontend build && rm -rf apps/api/public && mkdir -p apps/api/public && cp -R apps/frontend/dist/. apps/api/public",
+    "dev": "bun run build && bun run --cwd apps/api dev",
+    "lint": "bun run --cwd apps/api lint && bun run --cwd apps/frontend lint",
+    "test": "bun run --cwd apps/api test"
+  }
+}
+

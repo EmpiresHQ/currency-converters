@@ -1,0 +1,16 @@
+{
+  "name": "@currencyx/config",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@eslint/js": "^9.25.1",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "typescript-eslint": "^8.30.1"
+  },
+  "exports": {
+    "./eslint/base": "./eslint.base.mjs",
+    "./eslint/react": "./eslint.react.mjs",
+    "./tsconfig.base.json": "./tsconfig.base.json"
+  }
+}

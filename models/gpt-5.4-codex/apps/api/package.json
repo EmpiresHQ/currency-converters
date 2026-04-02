@@ -1,0 +1,27 @@
+{
+  "name": "@currencyx/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply currency-converter --local && wrangler dev --local",
+    "lint": "eslint src",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.8.3",
+    "kysely": "^0.28.2",
+    "kysely-d1": "^0.4.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260401.0",
+    "@eslint/js": "^9.25.1",
+    "bun-types": "^1.2.10",
+    "eslint": "^9.25.1",
+    "miniflare": "^4.20260401.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.30.1",
+    "wrangler": "^4.11.1"
+  }
+}
