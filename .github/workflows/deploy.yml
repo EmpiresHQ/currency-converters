@@ -39,9 +39,15 @@ jobs:
             if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
               MODELS=$(ls -d models/*/ 2>/dev/null | xargs -I{} basename {} | jq -R -s -c 'split("\n") | map(select(. != ""))')
             else
-              MODELS=$(git diff --name-only "$BEFORE" "$AFTER" -- models/ \
-                | cut -d'/' -f2 | sort -u \
-                | jq -R -s -c 'split("\n") | map(select(. != ""))')
+              # If scripts/ or workflow changed, redeploy all models
+              INFRA_CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" -- scripts/ .github/workflows/deploy.yml)
+              if [ -n "$INFRA_CHANGED" ]; then
+                MODELS=$(ls -d models/*/ 2>/dev/null | xargs -I{} basename {} | jq -R -s -c 'split("\n") | map(select(. != ""))')
+              else
+                MODELS=$(git diff --name-only "$BEFORE" "$AFTER" -- models/ \
+                  | cut -d'/' -f2 | sort -u \
+                  | jq -R -s -c 'split("\n") | map(select(. != ""))')
+              fi
             fi
           fi
           echo "models=$MODELS" >> "$GITHUB_OUTPUT"
