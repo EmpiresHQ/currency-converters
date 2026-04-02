@@ -6,6 +6,7 @@ export { RateTicker };
 interface Env {
   DB: D1Database;
   RATE_TICKER: DurableObjectNamespace;
+  ASSETS: Fetcher;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -77,6 +78,11 @@ app.get('/ws', async (c) => {
   const id = c.env.RATE_TICKER.idFromName('default');
   const stub = c.env.RATE_TICKER.get(id);
   return stub.fetch(c.req.raw);
+});
+
+// Fallback: serve static assets for non-API routes
+app.all('*', async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
 });
 
 export default {
