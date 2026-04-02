@@ -1,0 +1,17 @@
+{
+  "name": "currency-converter",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "cd apps/frontend && bun run build && cd ../.. && rm -rf apps/api/public && cp -r apps/frontend/dist apps/api/public && cd apps/api && bun run dev",
+    "build": "cd apps/frontend && bun run build && cd ../.. && rm -rf apps/api/public && cp -r apps/frontend/dist apps/api/public",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

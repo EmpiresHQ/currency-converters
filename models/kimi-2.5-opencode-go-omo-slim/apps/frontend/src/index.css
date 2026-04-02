@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --animate-spin-slow: spin 3s linear infinite;
+  --animate-flash-green: flashGreen 0.5s ease-out;
+  --animate-flash-red: flashRed 0.5s ease-out;
+
+  @keyframes flashGreen {
+    0% { background-color: rgba(34, 197, 94, 0.5); }
+    100% { background-color: transparent; }
+  }
+
+  @keyframes flashRed {
+    0% { background-color: rgba(239, 68, 68, 0.5); }
+    100% { background-color: transparent; }
+  }
+}
+
+@layer base {
+  body {
+    background-color: oklch(0.21 0.034 264.665);
+    color: white;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .rate-card {
+    background-color: oklch(0.278 0.033 256.848);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    border: 1px solid oklch(0.373 0.034 259.733);
+    transition: all 150ms ease-out;
+  }
+
+  .rate-card.flash-up {
+    animation: flashGreen 0.5s ease-out;
+  }
+
+  .rate-card.flash-down {
+    animation: flashRed 0.5s ease-out;
+  }
+}

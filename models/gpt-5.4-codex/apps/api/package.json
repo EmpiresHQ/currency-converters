@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler d1 migrations apply currency-converter --local && wrangler dev --local",
+    "dev": "WRANGLER_LOG_PATH=.wrangler/logs wrangler d1 migrations apply currency-converter --local && WRANGLER_LOG_PATH=.wrangler/logs wrangler dev --local",
     "lint": "eslint src",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

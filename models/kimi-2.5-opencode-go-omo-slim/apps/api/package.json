@@ -1,0 +1,21 @@
+{
+  "name": "@currency-converter/api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler d1 migrations apply currency-db --local && wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "kysely": "^0.27.4",
+    "kysely-d1": "^0.4.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0"
+  }
+}

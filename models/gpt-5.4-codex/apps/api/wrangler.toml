@@ -1,0 +1,24 @@
+#:schema ./node_modules/wrangler/config-schema.json
+
+name = "currencyx-api"
+main = "./src/index.ts"
+compatibility_date = "2026-04-02"
+
+[assets]
+binding = "ASSETS"
+directory = "./public"
+not_found_handling = "none"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "currency-converter"
+migrations_dir = "./migrations"
+
+[[durable_objects.bindings]]
+name = "RATE_TICKER"
+class_name = "RateTicker"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateTicker"]
