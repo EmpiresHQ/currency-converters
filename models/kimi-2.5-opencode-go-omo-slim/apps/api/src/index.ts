@@ -47,6 +47,11 @@ app.get('/ws', async (c) => {
 
 
 
+// Catch-all: delegate to ASSETS binding for SPA
+app.all('*', async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
 // Re-export Durable Object class
 export { RateTicker };
 
