@@ -20,9 +20,17 @@ Recent conversions are persisted in `sessionStorage` (browser API) and synced wi
 Conversion can be done between any pairs. If the direct rate is not found, the intermediate rate is `USD`. When a conversion uses USD as an intermediary, the API response and UI should indicate this (e.g., "Converted via USD").
 
 **IMPORTANT!**
-There are two currency providers:
-- **FIAT**: ExchangeRate-API — endpoint: `https://open.er-api.com/v6/latest/USD`. Returns all fiat rates relative to USD in a single call. Free, no auth, no rate limit concerns at 1 call/minute.
-- **Crypto**: CoinGecko API — endpoint: `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd`. Returns crypto prices in USD. **Free tier is rate-limited to ~10-30 calls/minute.** Fetch all needed coins in a single call using comma-separated IDs. Do NOT make one request per coin. Implement retry with exponential backoff on 429 responses.
+There is a single currency provider for both FIAT and crypto:
+- **fawazahmed0/exchange-api** — a free, no-auth API hosted on Cloudflare Pages.
+  - **Rates endpoint:** `https://latest.currency-api.pages.dev/v1/currencies/usd.json` — returns all rates relative to USD in a single call. Response shape: `{ "date": "...", "usd": { "eur": 0.86, "btc": 0.000015, ... } }`. Codes are **lowercase** — must be uppercased. The response contains hundreds of currencies (fiat + crypto + obscure tokens); filter to only the currencies you need (known fiat codes + BTC, ETH, SOL, XRP).
+  - **Currency names endpoint:** `https://latest.currency-api.pages.dev/v1/currencies.json` — returns `{ "eur": "Euro", "btc": "Bitcoin", ... }`. Fetch alongside rates to populate currency names in the DB.
+  - Fiat rates are stored as `USD → X` (e.g., source=USD, target=EUR, rate=0.86). Crypto rates must be inverted: the API returns `usd → btc = 0.000015` (meaning 1 USD = 0.000015 BTC), but we need `BTC → USD`, so store as `source=BTC, target=USD, rate=1/0.000015`.
+  - Free, no auth, no rate limit concerns.
+
+**NOTE — Do NOT use CoinGecko or ExchangeRate-API.** CoinGecko's free tier is unreliable from Cloudflare Workers. ExchangeRate-API does not return currency names. fawazahmed0/exchange-api provides both rates and names for all currencies in a single source.
+
+**IMPORTANT — Seed middleware must check both types:**
+The initial seed middleware must verify that BOTH fiat AND crypto currencies exist in the DB before skipping. If only fiat was seeded (e.g., fetch partially failed), the middleware must re-run the scheduled handler to fill in the missing data. Check `WHERE type = 'fiat'` and `WHERE type = 'crypto'` separately.
 
 ## General Architecture
 
@@ -100,6 +108,7 @@ The deploy pipeline generates `wrangler.toml` with these binding names. Code **m
 |---------|------|-------------|
 | D1 Database | `DB` | Access via `env.DB` in Hono context |
 | Durable Object | `RATE_TICKER` | Access via `env.RATE_TICKER`, class name must be `RateTicker` |
+| Static Assets | `ASSETS` | Access via `env.ASSETS.fetch()` — used in catch-all route to serve SPA |
 
 #### Worker Entry Point Shape
 
@@ -129,14 +138,18 @@ The deploy pipeline copies `apps/frontend/dist/` into `apps/api/public/` and con
 - `not_found_handling = "single-page-application"` — SPA fallback for client-side routes
 - `run_worker_first = true` — ALL requests hit the Worker first, then fall through to static assets if the Worker doesn't return a response
 
-The Worker does **not** need to serve static files manually. Do not use `[site]` — it is legacy Workers Sites. Use `[assets]` which is the current Cloudflare Workers static assets system.
+Do not use `[site]` — it is legacy Workers Sites. Use `[assets]` which is the current Cloudflare Workers static assets system.
 
-**CRITICAL: Because `run_worker_first = true` is set, the Worker receives EVERY request first — including requests for static assets like `/index.html`, `/assets/main.js`, etc.** The Worker MUST only handle `/api/*` and `/ws` routes. It MUST NOT have:
-- A catch-all route (e.g., `app.get('*', ...)`)
-- A fallback middleware that returns a response for unknown routes
-- A custom 404 handler that sends a response body
+**CRITICAL: Because `run_worker_first = true` is set, the Worker receives EVERY request first — including requests for static assets like `/index.html`, `/assets/main.js`, etc.** The Worker MUST have a catch-all route at the end that delegates to the `ASSETS` binding:
 
-If the Worker returns ANY response for non-API routes, the static assets layer will never serve those files and the SPA will be broken. Unmatched routes must fall through (return nothing) so the `[assets]` layer can serve them.
+```typescript
+// After all /api/* and /ws routes:
+app.all('*', async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+```
+
+Without this catch-all, Hono's default 404 response will prevent the `[assets]` layer from serving static files and the SPA will be broken. The `ASSETS` binding handles SPA fallback (`not_found_handling = "single-page-application"`), so unknown paths correctly serve `index.html`.
 
 For **local development**, the Hono app should serve static files from `../frontend/dist/` or use Vite's proxy. This is optional — the deploy pipeline does not depend on it.
 
@@ -157,16 +170,20 @@ For **local development**, the Hono app should serve static files from `../front
 1. `GET /api/available_currencies` — returns all available currencies (FIAT and crypto)
 2. `POST /api/convert` — converts an amount between two currencies; response includes `via_usd: boolean` indicator
 3. `GET /api/rate_history` — returns historical exchange rate data (time series of rate snapshots from the `rate_history` table). This is NOT user conversion history — user conversions are stored client-side in `sessionStorage` only.
-4. `GET /ws` — upgrades to WebSocket connection via Durable Object for live rate ticker
+4. `GET /api/rates?pairs=BTC/USD,EUR/USD,...` — returns current rates for specific pairs. Accepts a `pairs` query parameter (comma-separated). For each requested pair, the API looks up the direct rate first; if not found, tries the inverse direction and returns `1/rate`. This handles the direction mismatch where fiat rates are stored as `USD/EUR` but the dashboard needs `EUR/USD`. **Do NOT return all rates** — only the requested pairs. The frontend passes the dashboard widget pairs.
+5. `GET /ws` — upgrades to WebSocket connection via Durable Object for live rate ticker
 
 ### Rate Fetching — Cron Triggers
 
 Rates are fetched using Cloudflare **Cron Triggers** (configured in `wrangler.toml`):
 - Runs every minute
-- Fetches from both providers using native `fetch`
+- Fetches rates and currency names from fawazahmed0 API using native `fetch`
 - Writes new rates to D1
 - Stores historical snapshots in `rate_history` table
 - After writing, notifies the `RateTicker` Durable Object to broadcast updates to all connected WebSocket clients
+
+**IMPORTANT — Initial Seed on First Request:**
+The cron trigger does not fire immediately on deploy or on `wrangler dev` startup. The Worker **must** include a middleware on `/api/*` routes that checks if the `currencies` table is empty on the first request, and if so, runs the scheduled rate-fetch handler inline before proceeding. This ensures the app is usable immediately without waiting for the first cron tick. Use a module-level flag (e.g., `let seeded = false`) so the check only runs once.
 
 ### Durable Object — `RateTicker`
 
@@ -193,7 +210,7 @@ A stateful edge singleton that manages live WebSocket connections:
 | code | TEXT PK | Currency code (USD, BTC, etc.) |
 | name | TEXT | Full name |
 | type | TEXT | "fiat" or "crypto" |
-| provider | TEXT | "exchangerate-api" or "coingecko" |
+| provider | TEXT | "fawazahmed0" |
 
 **`rates`** (current rates — one row per currency pair, UPSERTed on each fetch)
 | Column | Type | Description |
@@ -219,13 +236,24 @@ A stateful edge singleton that manages live WebSocket connections:
 
 All rates in the `rates` table are stored as **"1 source = rate target"** (forward direction). Conversion math always uses this convention:
 
-1. Look up direct rate for `(source, target)` in `rates` table
+1. Look up direct rate for `(source, target)` — **try both directions**: if `(source, target)` is not found, try `(target, source)` and use `1/rate`
 2. If found: `result = amount * rate` (`via_usd: false`)
-3. If not found, look up `(source, USD)` and `(USD, target)`:
+3. If not found, try via USD — look up `(source, USD)` and `(USD, target)`, **each leg trying both directions**:
    - `result = amount * source_to_usd_rate * usd_to_target_rate` (`via_usd: true`)
 4. If neither path exists, return an error
 
-**Rate storage convention:** When fetching from providers, normalize all rates to forward direction. ExchangeRate-API returns all rates relative to a base (e.g., base=USD gives "1 USD = X target"), so store as `source=USD, target=X, rate=X`. CoinGecko returns prices in USD (e.g., BTC price = 67432 USD), so store as `source=BTC, target=USD, rate=67432`.
+**IMPORTANT — Bidirectional rate lookup is required.** Every rate lookup must try both `(A, B)` and `(B, A)` directions. This is because:
+- Fiat rates are stored as `USD → X` (e.g., `source=USD, target=EUR`)
+- Crypto rates are stored as `X → USD` (e.g., `source=BTC, target=USD`)
+- Converting USD → ETH requires finding `ETH → USD` and inverting it
+- Converting BTC → EUR requires `BTC → USD` (direct) then `USD → EUR` (direct) — both exist but in different directions
+
+Without bidirectional lookup, cross-type conversions (fiat ↔ crypto) will fail with "No conversion path found".
+
+**Rate storage convention:** The fawazahmed0 API returns all rates as `1 USD = X target` (e.g., `"eur": 0.86` means 1 USD = 0.86 EUR). For fiat, store directly as `source=USD, target=X, rate=X`. For crypto, the API returns `"btc": 0.000015` (1 USD = 0.000015 BTC) — invert this and store as `source=BTC, target=USD, rate=1/0.000015 ≈ 66667`. USD acts as the universal bridge between fiat and crypto.
+
+**IMPORTANT — Rate direction mismatch on the frontend:**
+The rate dashboard displays fixed pairs like `EUR/USD`, `GBP/USD`, but fiat rates are stored in the DB as `source=USD, target=EUR` (i.e., key `USD/EUR`). The frontend Zustand store **must** compute and store inverse rates for every rate update: when receiving `USD/EUR = 0.92`, also store `EUR/USD = 1/0.92 ≈ 1.087`. This ensures dashboard pairs always resolve regardless of which direction the rate was originally stored. Apply this to both the initial `/api/rates` fetch and incoming WebSocket updates.
 
 ### Validation
 
@@ -260,8 +288,9 @@ All rates in the `rates` table are stored as **"1 source = rate target"** (forwa
 ### UI
 
 Frontend is a SPA, no routing required. On startup it:
-1. Fetches available currencies via `GET /api/available_currencies`
-2. Opens a WebSocket connection to `/ws` for live rate updates
+1. Fetches available currencies via `GET /api/available_currencies` — **this must complete first** because it triggers the initial DB seed on fresh deploys (see "Initial Seed on First Request" in the backend section)
+2. Fetches current rates via `GET /api/rates` — **must happen after step 1** to ensure rates exist in the DB; populates the rate dashboard immediately
+3. Opens a WebSocket connection to `/ws` for live rate updates
 
 #### Layout
 
@@ -284,7 +313,7 @@ Frontend is a SPA, no routing required. On startup it:
 │  └──────────┘ └──────────┘ └──────────┘                 │
 │                                                          │
 │  ┌────────────────────────────────────────────────────┐  │
-│  │  [USD ▾]  →  [EUR ▾]     [  1000  ]  [ Convert ]  │  │
+│  │  [====USD ▾====]  [⇅]  [====EUR ▾====] [1000] [Go]│  │
 │  └────────────────────────────────────────────────────┘  │
 │                                                          │
 │  Result: 1000 USD = 1,084.20 EUR                         │
@@ -310,7 +339,7 @@ Frontend is a SPA, no routing required. On startup it:
   - % change since last update (green up arrow / red down arrow)
   - Canvas 2D sparkline showing rate history (last ~60 data points from WebSocket updates)
   - Flash animation on rate change (brief green/red background pulse)
-- **Converter section**: two dropdowns (source/target), amount input, convert button
+- **Converter section**: two custom Tailwind-styled dropdowns (source/target) — do NOT use native `<select>` elements. Build a custom `<CurrencyDropdown />` component with: a trigger button showing the selected currency, a chevron icon that rotates when open, a search/filter input at the top of the dropdown panel, a scrollable list of currencies with hover and active states, click-outside to close. All styled with Tailwind utility classes (dark theme: `bg-gray-800`, `border-gray-700`, etc.). The two dropdowns must **stretch equally (`flex-1`) to fill the available container width**; the swap button, amount input, and convert button remain fixed-width. Between the two dropdowns, a **swap button** (with a horizontal bi-directional arrows SVG icon) that swaps source and target currencies on click. Amount input and convert button.
 - **Result display**: shows converted amount, "Converted via USD" indicator when applicable
 - **Recent conversions table**: 10 most recent, with From/To/Amount/Result/Via USD columns
 - **"Clear history" button**: clears Zustand store + sessionStorage
@@ -361,5 +390,21 @@ Vite dev server configured with a proxy to the Hono backend (running locally via
 
 ### Local Development
 
-- `bun run dev` in `apps/api` — runs Hono with Miniflare (simulates Workers + D1 + DO locally)
+- `bun run dev` in `apps/api` — applies D1 migrations locally (`wrangler d1 migrations apply <db-name> --local`), then runs `wrangler dev` which uses Miniflare to emulate Workers + D1 + DO locally. The local D1 database is backed by SQLite stored under `.wrangler/`.
 - `bun run dev` in `apps/frontend` — runs Vite dev server with proxy to API
+- The root `models/<model-name>/package.json` **must** have a `"dev"` script so the entire app can be started locally with `bun dev` from the model directory. This script should: (1) build the frontend, (2) copy `apps/frontend/dist/` to `apps/api/public/`, (3) run the API dev server (which applies migrations and starts `wrangler dev`).
+- The `apps/api/package.json` `"dev"` script **must** apply D1 migrations before starting: `wrangler d1 migrations apply <db-name> --local && wrangler dev`
+
+### Report
+
+After implementation is complete, the model **must** create a `report.json` file in the model root directory (`models/<model-name>/report.json`) with the following structure:
+
+```json
+{
+  "model": "<model-identifier>",
+  "time_taken_minutes": "<number>"
+}
+```
+
+- `model`: The model identifier used (e.g., `"opus-4.6"`, `"sonnet-4.6"`)
+- `time_taken_minutes`: How many minutes the implementation took, as a string
