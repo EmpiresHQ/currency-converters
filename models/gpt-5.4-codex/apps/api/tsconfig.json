@@ -12,7 +12,7 @@
   },
   "include": [
     "src",
-    "wrangler.jsonc",
+    "wrangler.toml",
     "eslint.config.mjs"
   ]
 }
