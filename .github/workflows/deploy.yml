@@ -1,0 +1,138 @@
+name: Deploy Models
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'models/**'
+      - 'scripts/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Specific model folder to deploy (or "all")'
+        required: false
+        default: 'all'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.detect.outputs.models }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT="${{ github.event.inputs.model }}"
+            if [ "$INPUT" = "all" ] || [ -z "$INPUT" ]; then
+              MODELS=$(ls -d models/*/ 2>/dev/null | xargs -I{} basename {} | jq -R -s -c 'split("\n") | map(select(. != ""))')
+            else
+              MODELS=$(echo "[\"$INPUT\"]")
+            fi
+          else
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.event.after }}"
+            if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              MODELS=$(ls -d models/*/ 2>/dev/null | xargs -I{} basename {} | jq -R -s -c 'split("\n") | map(select(. != ""))')
+            else
+              MODELS=$(git diff --name-only "$BEFORE" "$AFTER" -- models/ \
+                | cut -d'/' -f2 | sort -u \
+                | jq -R -s -c 'split("\n") | map(select(. != ""))')
+            fi
+          fi
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "Deploying: $MODELS"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.models != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        model: ${{ fromJSON(needs.detect.outputs.models) }}
+      fail-fast: false
+      max-parallel: 5
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Wrangler
+        run: bun install -g wrangler@3
+
+      - name: Compute slug
+        id: slug
+        run: |
+          SLUG=$(echo "${{ matrix.model }}" | tr '[:upper:]' '[:lower:]' | sed 's/[.:]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//' | cut -c1-63)
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "Slug: $SLUG"
+
+      - name: Setup D1 database
+        id: d1
+        run: |
+          set -euo pipefail
+          DB_NAME="cc-${{ steps.slug.outputs.slug }}-db"
+
+          DB_ID=$(wrangler d1 info "$DB_NAME" --json 2>/dev/null | jq -r '.uuid // empty' || true)
+
+          if [ -z "$DB_ID" ]; then
+            echo "Creating D1 database: $DB_NAME"
+            RESULT=$(wrangler d1 create "$DB_NAME" --json)
+            DB_ID=$(echo "$RESULT" | jq -r '.uuid // .result.uuid // empty')
+          else
+            echo "D1 database already exists: $DB_NAME ($DB_ID)"
+          fi
+
+          if [ -z "$DB_ID" ]; then
+            echo "::error::Failed to create or find D1 database: $DB_NAME"
+            exit 1
+          fi
+          echo "db_id=$DB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Generate wrangler.toml
+        run: |
+          API_DIR="${{ github.workspace }}/models/${{ matrix.model }}/apps/api"
+          ./scripts/generate-wrangler-toml.sh \
+            "${{ steps.slug.outputs.slug }}" \
+            "${{ steps.d1.outputs.db_id }}" \
+            > "$API_DIR/wrangler.toml"
+
+      - name: Install dependencies
+        working-directory: models/${{ matrix.model }}
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build frontend
+        working-directory: models/${{ matrix.model }}/apps/frontend
+        run: bun run build
+
+      - name: Copy frontend assets
+        run: |
+          API_DIR="${{ github.workspace }}/models/${{ matrix.model }}/apps/api"
+          FRONTEND_DIST="${{ github.workspace }}/models/${{ matrix.model }}/apps/frontend/dist"
+          rm -rf "$API_DIR/public"
+          cp -r "$FRONTEND_DIST" "$API_DIR/public"
+
+      - name: Run D1 migrations
+        working-directory: models/${{ matrix.model }}/apps/api
+        run: wrangler d1 migrations apply "cc-${{ steps.slug.outputs.slug }}-db" --remote
+
+      - name: Deploy Worker
+        working-directory: models/${{ matrix.model }}/apps/api
+        run: wrangler deploy
+
+      - name: Deployment summary
+        run: |
+          SLUG="${{ steps.slug.outputs.slug }}"
+          echo "::notice::Deployed: https://${SLUG}.ui.ee"
+          echo "::notice::API: https://${SLUG}.ui.ee/api/available_currencies"
+          echo "::notice::Verify with: wrangler tail --name cc-${SLUG}"

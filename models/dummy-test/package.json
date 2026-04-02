@@ -1,0 +1,5 @@
+{
+  "name": "currency-converter-dummy-test",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}

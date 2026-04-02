@@ -1,0 +1,14 @@
+{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "hono": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
